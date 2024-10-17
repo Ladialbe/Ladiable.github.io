@@ -1,72 +1,87 @@
----
-layout: default
-title: Home
-notitle: true
+from flask import Flask, request, render_template_string, session
 
-# groups of columns of {roles: list, width: num, image: bool}
-role-tables:
-- - roles: [faculty, postdoc, staff]
-    width: 4
-    image: true
-  - roles: [grad]
-    width: 8
-    image: true
-- - roles: [collab, ugrad, ugrad-alum]
-    width: 5
-    image: false
-  - roles: [alum]
-    width: 7
-    image: false
+app = Flask(__name__)
+app.secret_key = 'your_secret_key'  # 用于安全地签名会话
 
----
+# 简单的状态机，用于跟踪对话状态
+states = {
+    'start': {
+        'question': "你好！我是Zero。你想聊些什么？",
+        'next_state': 'topic'
+    },
+    'topic': {
+        'question': "你选择了'{}'这个话题。你想知道什么？",
+        'next_state': 'details'
+    },
+    'details': {
+        'question': "关于'{}'，你想知道更多细节吗？",
+        'next_state': 'end'
+    },
+    'end': {
+        'question': "希望我们的对话对你有帮助！再见！",
+        'next_state': 'start'
+    }
+}
 
-<div class="jumbotron">
-    <p>
-        <b>肖航课题组</b>开发了首个<b>基于字符串的可逆晶体表示法: SLICES</b>,实现了生成式AI驱动的<b>Text2Crystal</b>。SLICES有望成为AI驱动的晶体材料逆向设计的标准工具,即<b>晶体材料的"SMILES"</b>。 
-    </p>
-    <p>
-    The <b>XIAO Research Group</b> developed the first <b>string-based invertible, invariant crystallographic representation: SLICES</b>, achieving <b>Text2Crystal</b> powered by generative AI. SLICES has the potential to become a standard tool for <i> in-silico </i> materials discovery, i.e. "SMILES" for crystal structures.
-    </p>
-</div>
+# 聊天机器人的逻辑
+def chatbot_response(message, state):
+    if state == 'start':
+        return states['start']['question'], 'topic'
+    elif state == 'topic':
+        topic = message.lower()
+        return states['topic']['question'].format(topic), 'details', topic
+    elif state == 'details':
+        return states['details']['question'].format(topic), 'end'
+    elif state == 'end':
+        return states['end']['question'], 'start'
 
-<script
-	type="module"
-	src="https://gradio.s3-us-west-2.amazonaws.com/4.41.0/gradio.js"
-></script>
-
-<gradio-app src="https://xiaohang07-slices.hf.space" theme_mode="light"></gradio-app>
-
-<gradio-app src="https://xiaohang07-mattergpt-cpu.hf.space" theme_mode="light"></gradio-app>
-
-
-<section>
-    <h2>News</h2>
-    <ul class="news list-unstyled">
-        {% for post in site.posts limit: site.front_page_news %}
-            {% include news-item.html item=post %}
-        {% endfor %}
-    </ul>
-    {% assign numposts = site.posts | size %}
-    {% if numposts >= 1 %}
-        <p>
-            <span class="fa fa-fw fa-history"></span>
-            <a href="{{ site.base }}/blog.html">Older posts&hellip;</a>
-        </p>
+# HTML模板
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>聊天机器人</title>
+</head>
+<body>
+    <h2>聊天机器人</h2>
+    {% if question %}
+        <p>机器人：{{ question }}</p>
     {% endif %}
-</section>
+    <form action="/" method="post">
+        <input type="text" name="message" placeholder="输入你的消息...">
+        <input type="submit" value="发送">
+    </form>
+    {% if response %}
+        <p>用户：{{ response }}</p>
+    {% endif %}
+</body>
+</html>
+'''
 
+@app.route('/', methods=['GET', 'POST'])
+def index():
+    response = ''
+    question = ''
+    next_state = 'start'
+    topic = ''
+    if 'state' in session:
+        state = session['state']
+    else:
+        state = 'start'
+    
+    if request.method == 'POST':
+        message = request.form['message']
+        if state == 'topic':
+            session['topic'] = message
+        response, next_state, topic = chatbot_response(message, state)
+        session['state'] = next_state
+        if topic:
+            session['topic'] = topic
+    else:
+        question = states[state]['question']
 
-<div id="people">
-    <h2>People</h2>
-    {% for role-table in page.role-tables %}
-        <section class="people row justify-content-between">
-            {% for role-column in role-table %}
-                <div class="col-md-{{ role-column.width }}">
-                    {% for role in role-column.roles %}
-                        {% include role-people.html role=role image=role-column.image %}
-                    {% endfor %}
-                </div>
-            {% endfor %}
-        </section>
-    {% endfor %}
-</div>
+    return render_template_string(HTML_TEMPLATE, question=question, response=response)
+
+if __name__ == '__main__':
+    app.run(debug=True)
